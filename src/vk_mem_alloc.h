@@ -3007,6 +3007,8 @@ typedef enum VmaPoolCreateFlagBits {
         VMA_POOL_CREATE_LINEAR_ALGORITHM_BIT |
         VMA_POOL_CREATE_BUDDY_ALGORITHM_BIT,
 
+    VMA_POOL_CREATE_EXPORTABLE_BIT = 0x00000010,
+
     VMA_POOL_CREATE_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
 } VmaPoolCreateFlagBits;
 typedef VkFlags VmaPoolCreateFlags;
@@ -7029,7 +7031,8 @@ public:
         VkDeviceSize bufferImageGranularity,
         uint32_t frameInUseCount,
         bool explicitBlockSize,
-        uint32_t algorithm);
+        uint32_t algorithm,
+        bool exportable);
     ~VmaBlockVector();
 
     VkResult CreateMinBlocks();
@@ -7112,6 +7115,7 @@ private:
     const uint32_t m_FrameInUseCount;
     const bool m_ExplicitBlockSize;
     const uint32_t m_Algorithm;
+    const bool m_Exportable;
     VMA_RW_MUTEX m_Mutex;
 
     /* There can be at most one allocation that is completely empty (except when minBlockCount > 0) -
@@ -12562,7 +12566,8 @@ VmaPool_T::VmaPool_T(
         (createInfo.flags & VMA_POOL_CREATE_IGNORE_BUFFER_IMAGE_GRANULARITY_BIT) != 0 ? 1 : hAllocator->GetBufferImageGranularity(),
         createInfo.frameInUseCount,
         createInfo.blockSize != 0, // explicitBlockSize
-        createInfo.flags & VMA_POOL_CREATE_ALGORITHM_MASK), // algorithm
+        createInfo.flags & VMA_POOL_CREATE_ALGORITHM_MASK, // algorithm
+        (createInfo.flags & VMA_POOL_CREATE_EXPORTABLE_BIT) != 0), // exportable
     m_Id(0),
     m_Name(VMA_NULL)
 {
@@ -12601,7 +12606,8 @@ VmaBlockVector::VmaBlockVector(
     VkDeviceSize bufferImageGranularity,
     uint32_t frameInUseCount,
     bool explicitBlockSize,
-    uint32_t algorithm) :
+    uint32_t algorithm,
+    bool exportable) :
     m_hAllocator(hAllocator),
     m_hParentPool(hParentPool),
     m_MemoryTypeIndex(memoryTypeIndex),
@@ -12612,6 +12618,7 @@ VmaBlockVector::VmaBlockVector(
     m_FrameInUseCount(frameInUseCount),
     m_ExplicitBlockSize(explicitBlockSize),
     m_Algorithm(algorithm),
+    m_Exportable(exportable),
     m_HasEmptyBlock(false),
     m_Blocks(VmaStlAllocator<VmaDeviceMemoryBlock*>(hAllocator->GetAllocationCallbacks())),
     m_NextBlockId(0)
@@ -13307,6 +13314,12 @@ VkResult VmaBlockVector::CreateBlock(VkDeviceSize blockSize, size_t* pNewBlockIn
         VmaPnextChainPushFront(&allocInfo, &allocFlagsInfo);
     }
 #endif // #if VMA_BUFFER_DEVICE_ADDRESS
+
+    VkExportMemoryAllocateInfo exportInfo = { VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+    if(m_Exportable) {
+        exportInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        VmaPnextChainPushFront(&allocInfo, &exportInfo);
+    }
 
     VkDeviceMemory mem = VK_NULL_HANDLE;
     VkResult res = m_hAllocator->AllocateVulkanMemory(&allocInfo, &mem);
@@ -15798,7 +15811,8 @@ VmaAllocator_T::VmaAllocator_T(const VmaAllocatorCreateInfo* pCreateInfo) :
             GetBufferImageGranularity(),
             pCreateInfo->frameInUseCount,
             false, // explicitBlockSize
-            false); // linearAlgorithm
+            false, // linearAlgorithm
+            false); // exportable
         // No need to call m_pBlockVectors[memTypeIndex][blockVectorTypeIndex]->CreateMinBlocks here,
         // becase minBlockCount is 0.
         m_pDedicatedAllocations[memTypeIndex] = vma_new(this, AllocationVectorType)(VmaStlAllocator<VmaAllocation>(GetAllocationCallbacks()));
